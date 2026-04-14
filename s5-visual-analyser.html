@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,10 +11,6 @@ body{background:#0f0f0f;color:#ddd;font-family:'IBM Plex Mono',monospace;font-si
 h1{font-size:16px;letter-spacing:3px;text-transform:uppercase;color:#9b7ee0;margin-bottom:4px}
 .sub{font-size:10px;color:#444;letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
 label{display:block;font-size:10px;color:#555;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;margin-top:20px}
-input[type=password]{width:100%;background:#1a1a1a;border:1px solid #2a2a2a;color:#ddd;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:10px 12px;outline:none;transition:border-color .15s;margin-bottom:4px}
-input[type=password]:focus{border-color:#7c5cbf}
-.key-note{font-size:10px;color:#444;margin-bottom:4px}
-.key-note.ok{color:#2ecc71}
 textarea{width:100%;background:#1a1a1a;border:1px solid #2a2a2a;color:#ddd;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px;outline:none;resize:vertical;line-height:1.7;transition:border-color .15s}
 textarea:focus{border-color:#7c5cbf}
 textarea::placeholder{color:#333}
@@ -24,7 +21,7 @@ button.go:disabled{opacity:.45;cursor:not-allowed}
 .spinner{width:13px;height:13px;border:1.5px solid rgba(155,127,232,.25);border-top-color:#9b7ee0;border-radius:50%;animation:spin .7s linear infinite;display:none}
 .spinner.on{display:block}
 @keyframes spin{to{transform:rotate(360deg)}}
-.err{background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.3);color:#e74c3c;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.5;display:none;white-space:pre-wrap}
+.err{background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.3);color:#e74c3c;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.5;display:none}
 .results{display:none}
 .results.show{display:block}
 .score-banner{display:flex;align-items:center;gap:20px;background:#1a1a1a;border:1px solid #252525;padding:18px 20px;margin-bottom:16px}
@@ -49,13 +46,9 @@ button.go:disabled{opacity:.45;cursor:not-allowed}
 <h1>S5 · Visual Analyser</h1>
 <div class="sub">Classic Vehicle Photo Evaluation</div>
 
-<label>Anthropic API Key</label>
-<input type="password" id="api-key" placeholder="sk-ant-…" oninput="onKey()"/>
-<div class="key-note" id="key-note">Saved in this browser session only — sent directly to Anthropic.</div>
-
-<label>Image URLs — one per line, no limit</label>
+<label>Image URLs — one per line, up to 10</label>
 <textarea id="urls" rows="6" placeholder="https://images.blocketcdn.se/item/photo1.jpg&#10;https://images.blocketcdn.se/item/photo2.jpg&#10;https://images.autoscout24.com/photo.jpg&#10;…"></textarea>
-<div class="hint">Right-click any photo on the listing → Copy image address → paste here.</div>
+<div class="hint">Right-click any photo on the listing → Copy image address → paste here.<br>Works with Blocket, AutoScout24, Willhaben, mobile.de and most listing sites.</div>
 
 <button class="go" id="go" onclick="run()">
   <div class="spinner" id="spin"></div>
@@ -65,60 +58,33 @@ button.go:disabled{opacity:.45;cursor:not-allowed}
 <div class="results" id="results"></div>
 
 <script>
-// Restore key from session
-const saved = sessionStorage.getItem('s5_apikey') || '';
-if(saved){ document.getElementById('api-key').value = saved; note('Key loaded from session.', true); }
-
-function onKey(){
-  const k = document.getElementById('api-key').value.trim();
-  sessionStorage.setItem('s5_apikey', k);
-  note(k ? 'Key saved for this session.' : 'Saved in this browser session only — sent directly to Anthropic.', !!k);
-}
-function note(t, ok){ const n = document.getElementById('key-note'); n.textContent = t; n.className = 'key-note' + (ok ? ' ok' : ''); }
+const WH = 'https://hook.eu1.make.com/vc96osrefgq5tkpu8ooavor1xa8vnbqg';
 
 async function run(){
-  const key = document.getElementById('api-key').value.trim();
-  if(!key){ showErr('Please enter your Anthropic API key.'); return; }
-
   const urls = document.getElementById('urls').value
     .split('\n').map(u => u.trim()).filter(u => u.startsWith('http'));
   if(!urls.length){ showErr('Please paste at least one image URL.'); return; }
+  if(urls.length > 10){ showErr('Maximum 10 URLs at a time.'); return; }
 
   hide(); setLoad(true);
   document.getElementById('results').classList.remove('show');
   document.getElementById('results').innerHTML = '';
 
-  // Build content array: image blocks (URL type) + text prompt
-  const content = urls.map(u => ({
-    type: 'image',
-    source: { type: 'url', url: u }
-  }));
-  content.push({ type: 'text', text:
-    `You are an expert classic and collector vehicle evaluator. Analyse all ${urls.length} vehicle photo(s) provided.\n\nReturn ONLY raw JSON — no markdown, no backticks. Start with { and end with }.\n\nFields:\n- visual_score: number 0-10\n- recommendation: "Looks good"|"Inspect carefully"|"Concerns noted"|"Avoid"\n- summary: 2-3 sentence overall impression\n- paint: condition, rust, defects\n- body: panel gaps, dents, damage\n- interior: condition or "Not shown"\n- engine_bay: condition or "Not shown"\n- undercarriage: condition or "Not shown"\n- wheels_tyres: condition or "Not shown"\n- odometer_reading: visible reading or "Not shown"\n- photo_count: number of photos analysed\n- photo_quality: "Thorough — many angles"|"Adequate"|"Limited — few angles"|"Suspicious — possibly stock"\n- modifications_visible: description or "None noted"\n- green_flags: string array max 5\n- red_flags: string array max 5`
-  });
-
   try{
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(WH, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
-        messages: [{ role: 'user', content }]
-      })
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({urls})
     });
-
-    const data = await res.json();
-    if(!res.ok) throw new Error(data.error?.message || 'API error ' + res.status);
-
-    let txt = data.content?.[0]?.text || '';
-    txt = txt.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    draw(JSON.parse(txt), urls);
-
+    if(!res.ok) throw new Error('Make returned ' + res.status);
+    const txt = await res.text();
+    let d;
+    try{ d = JSON.parse(txt); }
+    catch(e){
+      const c = txt.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
+      d = JSON.parse(c);
+    }
+    draw(d, urls);
   } catch(e){ showErr(e.message); }
   setLoad(false);
 }
