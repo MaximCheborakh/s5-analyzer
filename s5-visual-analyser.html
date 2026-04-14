@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S5 · Visual Analyser</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f0f0f;color:#ddd;font-family:'IBM Plex Mono',monospace;font-size:13px;min-height:100vh;padding:32px 24px;max-width:860px;margin:0 auto}
+h1{font-size:16px;letter-spacing:3px;text-transform:uppercase;color:#9b7ee0;margin-bottom:4px}
+.sub{font-size:10px;color:#444;letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
+
+label{display:block;font-size:10px;color:#555;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}
+
+textarea{width:100%;background:#1a1a1a;border:1px solid #2a2a2a;color:#ddd;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px;outline:none;resize:vertical;line-height:1.7;transition:border-color .15s}
+textarea:focus{border-color:#7c5cbf}
+textarea::placeholder{color:#444}
+
+.hint{font-size:10px;color:#444;margin-top:6px;margin-bottom:20px;line-height:1.6}
+
+button.go{width:100%;background:rgba(124,92,191,.15);border:1px solid #7c5cbf;color:#9b7ee0;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:14px;cursor:pointer;margin-bottom:16px;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:10px}
+button.go:hover:not(:disabled){background:rgba(124,92,191,.28)}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+
+.spinner{width:13px;height:13px;border:1.5px solid rgba(155,127,232,.25);border-top-color:#9b7ee0;border-radius:50%;animation:spin .7s linear infinite;display:none}
+.spinner.on{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.err{background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.3);color:#e74c3c;padding:10px 14px;font-size:11px;margin-bottom:16px;line-height:1.5;display:none}
+
+/* RESULTS */
+.results{display:none}
+.results.show{display:block}
+
+.score-banner{display:flex;align-items:center;gap:20px;background:#1a1a1a;border:1px solid #252525;padding:18px 20px;margin-bottom:16px}
+.score-circle{width:68px;height:68px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;border:2px solid;flex-shrink:0}
+.rec-badge{display:inline-block;padding:4px 12px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid;margin-bottom:8px}
+.summary{font-size:12px;color:#999;line-height:1.7}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.cell{background:#1a1a1a;border:1px solid #222;padding:10px 12px}
+.cell-lbl{font-size:9px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px}
+.cell-val{font-size:12px;line-height:1.5}
+
+.flags{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+.flag-block{background:#1a1a1a;border:1px solid #222;padding:10px 12px}
+.flag-title{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px}
+.flag-item{font-size:11px;padding:3px 0;border-bottom:1px solid #1c1c1c;line-height:1.5}
+.flag-item:last-child{border:none}
+
+.photos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.photos-grid img{width:100%;height:150px;object-fit:cover;border:1px solid #222;display:block}
+</style>
+</head>
+<body>
+
+<h1>S5 · Visual Analyser</h1>
+<div class="sub">Classic Vehicle Photo Evaluation</div>
+
+<label>Image URLs — one per line, no limit</label>
+<textarea id="urls" rows="6" placeholder="https://images.blocketcdn.se/item/photo1.jpg&#10;https://images.blocketcdn.se/item/photo2.jpg&#10;https://images.autoscout24.com/photo1.jpg&#10;…"></textarea>
+<div class="hint">Right-click any photo on the listing → Copy image address → paste here.<br>Works with Blocket, AutoScout24, Willhaben, mobile.de and most listing sites.</div>
+
+<button class="go" id="go" onclick="run()">
+  <div class="spinner" id="spin"></div>
+  <span id="lbl">Analyse Photos</span>
+</button>
+<div class="err" id="err"></div>
+<div class="results" id="results"></div>
+
+<script>
+const WH = 'https://hook.eu1.make.com/hbxbkp43rrbba9epemw1l477fve1vj2p';
+
+async function run(){
+  const urls = document.getElementById('urls').value
+    .split('\n').map(u=>u.trim()).filter(u=>u.startsWith('http'));
+  if(!urls.length){showErr('Please paste at least one image URL.');return;}
+
+  setLoad(true); hide();
+  document.getElementById('results').classList.remove('show');
+  document.getElementById('results').innerHTML='';
+
+  try{
+    const res = await fetch(WH,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({urls, notes:''})
+    });
+    if(!res.ok) throw new Error('Make returned '+res.status+' — check scenario is active.');
+    const txt = await res.text();
+    let d;
+    try{ d=JSON.parse(txt); }
+    catch(e){
+      const c=txt.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
+      d=JSON.parse(c);
+    }
+    draw(d, urls);
+  } catch(e){ showErr(e.message); }
+  setLoad(false);
+}
+
+function col(s){ return s>=8?'#2ecc71':s>=6?'#f39c12':'#e74c3c'; }
+function rcol(r){ return {'Looks good':'#2ecc71','Inspect carefully':'#f39c12','Concerns noted':'#e74c3c','Avoid':'#e74c3c'}[r]||'#999'; }
+
+function draw(d, urls){
+  const sc = d.visual_score ?? '—';
+  const c = col(sc), rc = rcol(d.recommendation);
+
+  const fields = [
+    ['Paint', d.paint], ['Body', d.body],
+    ['Interior', d.interior], ['Engine bay', d.engine_bay],
+    ['Undercarriage', d.undercarriage], ['Wheels & tyres', d.wheels_tyres],
+    ['Odometer', d.odometer_reading], ['Photo quality', d.photo_quality],
+    ['Modifications', d.modifications_visible]
+  ];
+
+  const gf = (d.green_flags||[]).map(f=>`<div class="flag-item" style="color:#2ecc71">✓ ${f}</div>`).join('') || '<div class="flag-item" style="color:#444">None noted</div>';
+  const rf = (d.red_flags||[]).map(f=>`<div class="flag-item" style="color:#e74c3c">✗ ${f}</div>`).join('') || '<div class="flag-item" style="color:#444">None noted</div>';
+
+  const photos = urls.map(u=>`<img src="${u}" alt="" onerror="this.style.display='none'">`).join('');
+
+  document.getElementById('results').innerHTML = `
+    <div class="score-banner">
+      <div class="score-circle" style="color:${c};border-color:${c}">${sc}</div>
+      <div>
+        <div class="rec-badge" style="color:${rc};border-color:${rc}">${d.recommendation||'—'}</div>
+        <div class="summary">${d.summary||''}</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      ${fields.filter(([,v])=>v&&v!=='Not shown').map(([l,v])=>
+        `<div class="cell"><div class="cell-lbl">${l}</div><div class="cell-val">${v}</div></div>`
+      ).join('')}
+    </div>
+
+    <div class="flags">
+      <div class="flag-block"><div class="flag-title" style="color:#2ecc71">Green flags</div>${gf}</div>
+      <div class="flag-block"><div class="flag-title" style="color:#e74c3c">Red flags</div>${rf}</div>
+    </div>
+
+    <div style="font-size:10px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Photos analysed (${d.photo_count||urls.length})</div>
+    <div class="photos-grid">${photos}</div>
+  `;
+  document.getElementById('results').classList.add('show');
+}
+
+function showErr(m){ const e=document.getElementById('err'); e.textContent=m; e.style.display='block'; }
+function hide(){ document.getElementById('err').style.display='none'; }
+function setLoad(on){
+  document.getElementById('spin').classList.toggle('on',on);
+  document.getElementById('lbl').textContent = on ? 'Analysing…' : 'Analyse Photos';
+  document.getElementById('go').disabled = on;
+}
+</script>
+</body>
+</html>
